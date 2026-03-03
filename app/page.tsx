@@ -30,7 +30,7 @@ export default function LegalDashboardPage() {
   return (
     <SidebarProvider>
       <AppSidebar activeView={activeView} onNavigate={handleNavigate} />
-      <SidebarInset className={selectedDraft ? "max-h-svh overflow-hidden" : ""}>
+      <SidebarInset>
         <DashboardHeader activeView={selectedDraft ? "contract-view" : activeView} />
 
         {/* Contract Viewer takes over the main area when a draft is selected */}

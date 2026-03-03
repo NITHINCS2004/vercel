@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState } from "react"
 import { format } from "date-fns"
 import {
   X,
@@ -24,12 +24,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { DraftForReview, ContractSection, RiskTier, ReviewReport } from "@/lib/mock-data"
-import { resolveTemplate, generateReviewReport } from "@/lib/mock-data"
-import { ReviewAgentLoading } from "@/components/review-agent-loading"
-import { PlaybookReviewReport } from "@/components/playbook-review-report"
-
-type ViewState = "draft" | "agent-loading" | "review-report"
+import type { DraftForReview, ContractSection, RiskTier } from "@/lib/mock-data"
+import { resolveTemplate } from "@/lib/mock-data"
 
 function getRiskBadgeClass(risk: RiskTier) {
   const map: Record<RiskTier, string> = {
@@ -60,8 +56,8 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(sections.map((s) => s.section_id))
   )
-  const [viewState, setViewState] = useState<ViewState>("draft")
-  const [reviewReport, setReviewReport] = useState<ReviewReport | null>(null)
+  const [agentRunning, setAgentRunning] = useState(false)
+  const [agentComplete, setAgentComplete] = useState(false)
 
   const statusInfo = getStatusLabel(draft.status)
 
@@ -81,44 +77,17 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
   const collapseAll = () => setExpandedSections(new Set())
 
   const handleRunAgent = () => {
-    if (reviewReport) {
-      setViewState("review-report")
-    } else {
-      setViewState("agent-loading")
-    }
-  }
-
-  const handleAgentComplete = useCallback(() => {
-    const report = generateReviewReport(draft)
-    setReviewReport(report)
-    setViewState("review-report")
-  }, [draft])
-
-  const handleCloseReport = () => {
-    setViewState("draft")
-  }
-
-  // If showing loading or report, render those instead
-  if (viewState === "agent-loading") {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <ReviewAgentLoading onComplete={handleAgentComplete} />
-      </div>
-    )
-  }
-
-  if (viewState === "review-report" && reviewReport) {
-    return (
-      <PlaybookReviewReport
-        report={reviewReport}
-        draft={draft}
-        onClose={handleCloseReport}
-      />
-    )
+    setAgentRunning(true)
+    setAgentComplete(false)
+    // Simulate agent run
+    setTimeout(() => {
+      setAgentRunning(false)
+      setAgentComplete(true)
+    }, 3000)
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       {/* Fixed Header */}
       <div className="shrink-0 border-b border-border bg-card">
         {/* Primary info row */}
@@ -148,15 +117,18 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
                 <TooltipTrigger asChild>
                   <Button
                     onClick={handleRunAgent}
+                    disabled={agentRunning}
                     size="sm"
                     className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                   >
-                    {reviewReport ? (
+                    {agentRunning ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : agentComplete ? (
                       <CheckCircle2 className="size-3.5" />
                     ) : (
                       <Bot className="size-3.5" />
                     )}
-                    {reviewReport ? "View Review Report" : "Run AI Review Agent"}
+                    {agentRunning ? "Running Review..." : agentComplete ? "Review Complete" : "Run AI Review Agent"}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -220,10 +192,10 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
       </div>
 
       {/* Document area -- page background with the paper card inside */}
-      <div className="min-h-0 flex-1 bg-muted/30 px-6 py-6">
+      <div className="flex-1 overflow-hidden bg-muted/30 px-6 py-6">
         <div className="mx-auto flex h-full max-w-4xl flex-col">
-          {/* Document Paper -- constrained height, scroll inside */}
-          <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card shadow-sm">
+          {/* Document Paper -- fixed height, scroll inside */}
+          <div className="flex h-full flex-col rounded-lg border border-border bg-card shadow-sm">
             {/* Document Title -- pinned at top of paper */}
             <div className="shrink-0 border-b border-border px-8 py-5 text-center">
               <h1 className="text-lg font-bold tracking-wide text-foreground">
@@ -238,7 +210,7 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
             </div>
 
             {/* Scrollable sections inside the paper */}
-            <ScrollArea className="min-h-0 flex-1">
+            <ScrollArea className="flex-1">
               <div className="flex flex-col">
                 {sections.map((section, idx) => (
                   <ContractSectionBlock
