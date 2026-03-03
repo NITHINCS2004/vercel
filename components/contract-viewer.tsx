@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { format } from "date-fns"
 import {
   X,
@@ -24,8 +24,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { DraftForReview, ContractSection, RiskTier } from "@/lib/mock-data"
-import { resolveTemplate } from "@/lib/mock-data"
+import type { DraftForReview, ContractSection, RiskTier, ReviewReport } from "@/lib/mock-data"
+import { resolveTemplate, generateReviewReport } from "@/lib/mock-data"
+import { ReviewAgentLoading } from "@/components/review-agent-loading"
+import { PlaybookReviewReport } from "@/components/playbook-review-report"
+
+type ViewState = "draft" | "agent-loading" | "review-report"
 
 function getRiskBadgeClass(risk: RiskTier) {
   const map: Record<RiskTier, string> = {
@@ -56,8 +60,8 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(sections.map((s) => s.section_id))
   )
-  const [agentRunning, setAgentRunning] = useState(false)
-  const [agentComplete, setAgentComplete] = useState(false)
+  const [viewState, setViewState] = useState<ViewState>("draft")
+  const [reviewReport, setReviewReport] = useState<ReviewReport | null>(null)
 
   const statusInfo = getStatusLabel(draft.status)
 
@@ -77,13 +81,40 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
   const collapseAll = () => setExpandedSections(new Set())
 
   const handleRunAgent = () => {
-    setAgentRunning(true)
-    setAgentComplete(false)
-    // Simulate agent run
-    setTimeout(() => {
-      setAgentRunning(false)
-      setAgentComplete(true)
-    }, 3000)
+    if (reviewReport) {
+      setViewState("review-report")
+    } else {
+      setViewState("agent-loading")
+    }
+  }
+
+  const handleAgentComplete = useCallback(() => {
+    const report = generateReviewReport(draft)
+    setReviewReport(report)
+    setViewState("review-report")
+  }, [draft])
+
+  const handleCloseReport = () => {
+    setViewState("draft")
+  }
+
+  // If showing loading or report, render those instead
+  if (viewState === "agent-loading") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ReviewAgentLoading onComplete={handleAgentComplete} />
+      </div>
+    )
+  }
+
+  if (viewState === "review-report" && reviewReport) {
+    return (
+      <PlaybookReviewReport
+        report={reviewReport}
+        draft={draft}
+        onClose={handleCloseReport}
+      />
+    )
   }
 
   return (
@@ -117,18 +148,15 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
                 <TooltipTrigger asChild>
                   <Button
                     onClick={handleRunAgent}
-                    disabled={agentRunning}
                     size="sm"
                     className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                   >
-                    {agentRunning ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : agentComplete ? (
+                    {reviewReport ? (
                       <CheckCircle2 className="size-3.5" />
                     ) : (
                       <Bot className="size-3.5" />
                     )}
-                    {agentRunning ? "Running Review..." : agentComplete ? "Review Complete" : "Run AI Review Agent"}
+                    {reviewReport ? "View Review Report" : "Run AI Review Agent"}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>

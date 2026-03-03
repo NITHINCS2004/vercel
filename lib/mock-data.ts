@@ -329,6 +329,192 @@ export function resolveTemplate(draft: DraftForReview): ContractSection[] {
   }))
 }
 
+// Review finding types aligned with review_findings + review_suggestions tables
+export type FindingSeverity = "HIGH" | "MEDIUM" | "LOW"
+export type ClauseDecision = "PENDING" | "ACCEPTED" | "REJECTED"
+
+export interface ReviewFinding {
+  id: number
+  review_id: number
+  block_id: string            // maps to contract_block_index.block_id
+  section_title: string
+  issue_type: string
+  severity: FindingSeverity
+  original_clause_text: string
+  issue_summary: string
+  violation_explanation: string
+  playbook_rule_citation: string
+  approved_fallback_language: string
+  risk_explanation: string
+  decision: ClauseDecision
+  legal_comment: string
+}
+
+export interface ReviewReport {
+  review_id: number
+  contract_id: number
+  findings: ReviewFinding[]
+  created_at: string
+}
+
+// Review findings generators per contract type
+// NDA flagged clauses
+const ndaFindings: Omit<ReviewFinding, "id" | "review_id" | "decision" | "legal_comment">[] = [
+  {
+    block_id: "sec-nda-4",
+    section_title: "Obligations of the Receiving Party",
+    issue_type: "Insufficient Protection Standard",
+    severity: "HIGH",
+    original_clause_text: `The Receiving Party shall protect the Confidential Information using the same degree of care it uses to protect its own confidential information of a similar nature, but in no event less than reasonable care.`,
+    issue_summary: "Protection standard defaults to 'reasonable care' minimum which is below playbook threshold for HIGH risk NDAs.",
+    violation_explanation: "For HIGH risk contracts, the playbook mandates a 'highest degree of care' standard rather than 'reasonable care'. The current clause allows the Receiving Party to apply a lower standard of protection, which is inadequate for sensitive disclosures involving trade secrets and proprietary technology.",
+    playbook_rule_citation: "NDA Playbook v2.1 - Section 3.2: 'HIGH risk NDAs must require the highest degree of care, not merely reasonable care.'",
+    approved_fallback_language: `The Receiving Party shall protect the Confidential Information using the highest degree of care it uses to protect its own most sensitive confidential information, and in no event less than the highest degree of care reasonably expected under the circumstances.`,
+    risk_explanation: "A 'reasonable care' standard is subjective and may be interpreted as a lower bar. In HIGH risk scenarios involving trade secrets and strategic IP, this could lead to inadequate protection and expose the Disclosing Party to significant competitive harm.",
+  },
+  {
+    block_id: "sec-nda-6",
+    section_title: "Term and Termination",
+    issue_type: "Non-Compliant Survival Period",
+    severity: "MEDIUM",
+    original_clause_text: `The confidentiality obligations set forth herein shall survive the termination or expiration of this Agreement for a period of three (3) years following such termination or expiration.`,
+    issue_summary: "Survival period of 3 years is below the playbook minimum of 5 years for HIGH risk NDAs in California.",
+    violation_explanation: "California HIGH risk NDAs require extended survival periods due to the state's strong trade secret protections under CUTSA. A 3-year survival period is insufficient and could leave sensitive IP unprotected during critical competitive windows.",
+    playbook_rule_citation: "NDA Playbook v2.1 - Section 5.1: 'Survival period for HIGH risk NDAs in CA must be minimum 5 years, or perpetual for trade secrets.'",
+    approved_fallback_language: `The confidentiality obligations set forth herein shall survive the termination or expiration of this Agreement for a period of five (5) years following such termination or expiration; provided, however, that with respect to any Confidential Information constituting trade secrets, such obligations shall survive for so long as such information remains a trade secret under applicable law.`,
+    risk_explanation: "Trade secrets disclosed under this NDA may retain their commercial value well beyond 3 years. A shorter survival period could leave the Disclosing Party without contractual recourse if the Receiving Party discloses confidential information after the survival window closes.",
+  },
+  {
+    block_id: "sec-nda-8",
+    section_title: "Governing Law and Jurisdiction",
+    issue_type: "Missing Arbitration Clause",
+    severity: "LOW",
+    original_clause_text: `Any dispute arising out of or relating to this Agreement shall be submitted to the exclusive jurisdiction of the state and federal courts located in {{state}}.`,
+    issue_summary: "The dispute resolution mechanism defaults to litigation. Playbook recommends arbitration as the primary mechanism for NDA disputes.",
+    violation_explanation: "While court jurisdiction is valid, the playbook guidance for NDAs recommends binding arbitration to maintain confidentiality of the dispute proceedings themselves, which is particularly important for confidential information disputes.",
+    playbook_rule_citation: "NDA Playbook v2.1 - Section 7.2: 'Preferred dispute resolution for NDAs is binding arbitration to maintain confidentiality of proceedings.'",
+    approved_fallback_language: `Any dispute arising out of or relating to this Agreement shall first be submitted to binding arbitration administered by the American Arbitration Association under its Commercial Arbitration Rules. The arbitration shall be conducted in {{state}}. The arbitrator's decision shall be final and binding. Notwithstanding the foregoing, either Party may seek injunctive relief in any court of competent jurisdiction.`,
+    risk_explanation: "Litigation is a public process. For confidential information disputes, public court filings could inadvertently expose the very information the NDA seeks to protect. Arbitration keeps proceedings private.",
+  },
+]
+
+// MSA flagged clauses
+const msaFindings: Omit<ReviewFinding, "id" | "review_id" | "decision" | "legal_comment">[] = [
+  {
+    block_id: "sec-msa-9",
+    section_title: "Limitation of Liability",
+    issue_type: "Non-Compliant Liability Cap",
+    severity: "HIGH",
+    original_clause_text: `EACH PARTY'S TOTAL AGGREGATE LIABILITY UNDER THIS AGREEMENT SHALL NOT EXCEED THE TOTAL FEES PAID OR PAYABLE UNDER THE APPLICABLE SOW DURING THE TWELVE (12) MONTH PERIOD PRECEDING THE EVENT GIVING RISE TO THE CLAIM.`,
+    issue_summary: "Liability cap references SOW-level fees instead of total agreement value. This is non-compliant for MEDIUM/HIGH risk MSAs.",
+    violation_explanation: "The playbook requires that liability caps for MEDIUM and HIGH risk MSAs reference the total fees under the Agreement (across all SOWs), not individual SOW fees. Limiting liability to a single SOW's fees significantly undervalues potential exposure.",
+    playbook_rule_citation: "MSA Playbook v3.2 - Section 4.1: 'Liability cap must reference total Agreement fees for MEDIUM+ risk. SOW-level caps are only permitted for LOW risk engagements.'",
+    approved_fallback_language: `EACH PARTY'S TOTAL AGGREGATE LIABILITY UNDER THIS AGREEMENT SHALL NOT EXCEED TWO TIMES (2x) THE TOTAL FEES PAID OR PAYABLE UNDER THIS AGREEMENT DURING THE TWELVE (12) MONTH PERIOD PRECEDING THE EVENT GIVING RISE TO THE CLAIM.`,
+    risk_explanation: "If the client has multiple active SOWs, a SOW-level cap could limit recovery to a fraction of the actual engagement value. For a $500K agreement with five $100K SOWs, the cap could be as low as $100K instead of $1M.",
+  },
+  {
+    block_id: "sec-msa-4",
+    section_title: "Term and Termination",
+    issue_type: "Missing Transition Assistance",
+    severity: "MEDIUM",
+    original_clause_text: `Upon termination, Service Provider shall: (a) cease all work under outstanding SOWs; (b) deliver all completed and in-progress deliverables; (c) return or destroy all Client Confidential Information.`,
+    issue_summary: "Termination provisions lack mandatory transition assistance period required by the playbook for MSAs.",
+    violation_explanation: "The MSA playbook requires that all termination clauses include a transition assistance period of no less than 30 days, during which the Service Provider must cooperate with the Client or a successor provider to ensure business continuity.",
+    playbook_rule_citation: "MSA Playbook v3.2 - Section 2.4: 'All MSAs must include transition assistance obligations of minimum 30 days upon termination.'",
+    approved_fallback_language: `Upon termination, Service Provider shall: (a) cease all work under outstanding SOWs; (b) deliver all completed and in-progress deliverables; (c) return or destroy all Client Confidential Information; (d) provide transition assistance to Client or its designated successor for a period of not less than thirty (30) days at Service Provider's then-current rates, including knowledge transfer, documentation, and reasonable cooperation.`,
+    risk_explanation: "Without transition assistance, the Client faces operational risk if the engagement is terminated mid-project. Critical knowledge, access credentials, and in-progress work could be lost, causing delays and additional costs.",
+  },
+  {
+    block_id: "sec-msa-11",
+    section_title: "Data Protection and Security",
+    issue_type: "Inadequate Breach Notification Window",
+    severity: "HIGH",
+    original_clause_text: `In the event of a data breach involving Client data, Service Provider shall: (a) notify Client within 48 hours of discovery...`,
+    issue_summary: "48-hour breach notification window exceeds the playbook maximum of 24 hours for MEDIUM+ risk MSAs.",
+    violation_explanation: "New York regulatory requirements (NY SHIELD Act) and the playbook mandate a 24-hour notification window for data breaches involving personal or sensitive business data. The current 48-hour window may result in delayed regulatory filings by the Client.",
+    playbook_rule_citation: "MSA Playbook v3.2 - Section 6.3: 'Data breach notification must be within 24 hours for MEDIUM and HIGH risk. 48 hours only permitted for LOW risk.'",
+    approved_fallback_language: `In the event of a data breach involving Client data, Service Provider shall: (a) notify Client within twenty-four (24) hours of discovery; (b) provide reasonable cooperation in investigating and mitigating the breach; (c) take all necessary steps to prevent recurrence; (d) provide a detailed written incident report within five (5) business days.`,
+    risk_explanation: "A 48-hour delay in breach notification can result in regulatory non-compliance for the Client, especially under the NY SHIELD Act. The Client needs prompt notification to meet its own reporting obligations and mitigate damages.",
+  },
+]
+
+// SOW flagged clauses
+const sowFindings: Omit<ReviewFinding, "id" | "review_id" | "decision" | "legal_comment">[] = [
+  {
+    block_id: "sec-sow-6",
+    section_title: "Acceptance Criteria",
+    issue_type: "Excessive Review Period",
+    severity: "MEDIUM",
+    original_clause_text: `Upon delivery of each deliverable, Client shall have ten (10) business days to review and either accept or reject the deliverable ("Review Period").`,
+    issue_summary: "10-day review period is below the playbook minimum of 15 business days for SOW acceptance testing.",
+    violation_explanation: "The playbook requires a minimum 15-business-day review period for SOW deliverables to ensure adequate time for quality assurance, user acceptance testing, and stakeholder review. A 10-day period may not provide sufficient time for thorough testing.",
+    playbook_rule_citation: "SOW Playbook v1.4 - Section 4.2: 'Minimum acceptance review period is 15 business days. May be extended for complex deliverables.'",
+    approved_fallback_language: `Upon delivery of each deliverable, Client shall have fifteen (15) business days to review and either accept or reject the deliverable ("Review Period"). For deliverables involving software or system integration, the Review Period shall be extended to twenty (20) business days.`,
+    risk_explanation: "An insufficient review period may result in deemed acceptance of defective deliverables. If Client fails to respond within 10 days due to resource constraints, the deliverable is automatically accepted regardless of quality.",
+  },
+  {
+    block_id: "sec-sow-9",
+    section_title: "Change Control",
+    issue_type: "Missing Cost Impact Provision",
+    severity: "LOW",
+    original_clause_text: `The Change Order shall specify: (a) the nature of the change; (b) the impact on deliverables, timeline, and fees; (c) any new or modified acceptance criteria.`,
+    issue_summary: "Change control clause lacks mandatory cost impact ceiling provision from the playbook.",
+    violation_explanation: "The playbook requires that change orders include a maximum cost impact threshold (typically 15% of SOW value) above which executive approval is required. Without this, incremental changes could cause significant budget overruns.",
+    playbook_rule_citation: "SOW Playbook v1.4 - Section 6.1: 'Change orders exceeding 15% cumulative cost impact require executive-level approval from both Parties.'",
+    approved_fallback_language: `The Change Order shall specify: (a) the nature of the change; (b) the impact on deliverables, timeline, and fees; (c) any new or modified acceptance criteria; (d) cumulative cost impact as a percentage of total SOW value. Any Change Order that would cause cumulative changes to exceed fifteen percent (15%) of the original SOW value shall require approval by authorized executive representatives of both Parties.`,
+    risk_explanation: "Without a cost ceiling mechanism, multiple small change orders could collectively inflate the SOW budget well beyond the approved amount. The 15% threshold provides a governance checkpoint for budget management.",
+  },
+]
+
+const findingsMap: Record<string, Omit<ReviewFinding, "id" | "review_id" | "decision" | "legal_comment">[]> = {
+  NDA: ndaFindings,
+  MSA: msaFindings,
+  SOW: sowFindings,
+}
+
+// Simulates review agent output based on draft metadata
+export function generateReviewReport(draft: DraftForReview): ReviewReport {
+  const baseFindingsList = findingsMap[draft.contract_type] || []
+  const findings: ReviewFinding[] = baseFindingsList.map((f, idx) => ({
+    ...f,
+    id: idx + 1,
+    review_id: draft.contract_id * 10,
+    decision: "PENDING" as ClauseDecision,
+    legal_comment: "",
+  }))
+
+  // Replace placeholders in fallback language
+  const resolvedFindings = findings.map((f) => ({
+    ...f,
+    original_clause_text: f.original_clause_text
+      .replace(/\{\{party_a\}\}/g, draft.party_a)
+      .replace(/\{\{party_b\}\}/g, draft.party_b)
+      .replace(/\{\{state\}\}/g, draft.state),
+    approved_fallback_language: f.approved_fallback_language
+      .replace(/\{\{party_a\}\}/g, draft.party_a)
+      .replace(/\{\{party_b\}\}/g, draft.party_b)
+      .replace(/\{\{state\}\}/g, draft.state),
+  }))
+
+  return {
+    review_id: draft.contract_id * 10,
+    contract_id: draft.contract_id,
+    findings: resolvedFindings,
+    created_at: new Date().toISOString(),
+  }
+}
+
+// Review progress steps shown during agent execution
+export const reviewProgressSteps = [
+  { label: "Initializing Review Agent", detail: "Loading playbook rules and clause library..." },
+  { label: "Analyzing Contract Structure", detail: "Validating section ordering against contract skeleton..." },
+  { label: "Checking Section Compliance", detail: "Comparing each clause against approved playbook rules..." },
+  { label: "Detecting Deviations", detail: "Identifying clauses that violate or deviate from policy..." },
+  { label: "Retrieving Fallback Language", detail: "Fetching approved alternative clauses from the clause library..." },
+  { label: "Assessing Risk Severity", detail: "Scoring each finding based on contract risk tier and jurisdiction..." },
+  { label: "Generating Review Report", detail: "Compiling findings, citations, and suggestions..." },
+]
+
 // Current Legal User
 export const currentUser: User = {
   id: 2,
