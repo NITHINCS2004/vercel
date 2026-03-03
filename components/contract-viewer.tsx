@@ -87,7 +87,7 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Fixed Header */}
       <div className="shrink-0 border-b border-border bg-card">
         {/* Primary info row */}
@@ -192,10 +192,10 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
       </div>
 
       {/* Document area -- page background with the paper card inside */}
-      <div className="flex-1 overflow-hidden bg-muted/30 px-6 py-6">
+      <div className="min-h-0 flex-1 bg-muted/30 px-6 py-6">
         <div className="mx-auto flex h-full max-w-4xl flex-col">
-          {/* Document Paper -- fixed height, scroll inside */}
-          <div className="flex h-full flex-col rounded-lg border border-border bg-card shadow-sm">
+          {/* Document Paper -- constrained height, scroll inside */}
+          <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card shadow-sm">
             {/* Document Title -- pinned at top of paper */}
             <div className="shrink-0 border-b border-border px-8 py-5 text-center">
               <h1 className="text-lg font-bold tracking-wide text-foreground">
@@ -210,7 +210,7 @@ export function ContractViewer({ draft, onClose }: ContractViewerProps) {
             </div>
 
             {/* Scrollable sections inside the paper */}
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="flex flex-col">
                 {sections.map((section, idx) => (
                   <ContractSectionBlock
