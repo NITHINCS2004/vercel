@@ -9,9 +9,7 @@ import {
   Check,
   X,
   MessageSquare,
-  Save,
   Send,
-  CheckCircle2,
   ChevronRight,
   Quote,
   Scale,
@@ -46,18 +44,21 @@ function getSeverityConfig(severity: FindingSeverity) {
 }
 
 function getDecisionConfig(decision: ClauseDecision) {
-  const map: Record<ClauseDecision, { label: string; className: string }> = {
+  const map: Record<ClauseDecision, { label: string; className: string; dotClass: string }> = {
     PENDING: {
       label: "Pending",
       className: "bg-muted text-muted-foreground border-border",
+      dotClass: "bg-muted-foreground",
     },
     ACCEPTED: {
       label: "Accepted",
       className: "bg-success/10 text-success-foreground border-success/20",
+      dotClass: "bg-success",
     },
     REJECTED: {
       label: "Rejected",
       className: "bg-destructive/10 text-destructive border-destructive/20",
+      dotClass: "bg-destructive",
     },
   }
   return map[decision]
@@ -76,7 +77,6 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
   )
   const [showCommentInput, setShowCommentInput] = useState<number | null>(null)
   const [commentDraft, setCommentDraft] = useState("")
-  const [isSaved, setIsSaved] = useState(false)
 
   const selectedFinding = findings.find((f) => f.id === selectedFindingId) ?? null
 
@@ -85,7 +85,6 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
       setFindings((prev) =>
         prev.map((f) => (f.id === findingId ? { ...f, decision } : f))
       )
-      setIsSaved(false)
     },
     []
   )
@@ -100,26 +99,18 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
       )
       setCommentDraft("")
       setShowCommentInput(null)
-      setIsSaved(false)
     },
     [commentDraft]
   )
 
-  const handleSave = () => {
-    setIsSaved(true)
-    // In a real app this would POST to /api/v1/reviews/{contract_id}/decision
-  }
-
   const handleRequestChanges = () => {
-    // Only allow if at least one finding has been decided
-    const hasDecisions = findings.some((f) => f.decision !== "PENDING")
-    if (!hasDecisions) return
-    // In a real app this would POST decision: "request_changes" with all findings + comments
-    onClose()
-  }
-
-  const handleApproveReport = () => {
-    // In a real app this would POST decision: "approve" to mark the contract as APPROVED
+    // Only enabled when ALL findings have been decided (no PENDING)
+    // Updates contract status to CHANGES_REQUESTED and sends back to BU
+    // In a real app: POST /api/v1/reviews/{contract_id}/request-changes
+    // - Sets review_requests.status = 'COMPLETED'
+    // - Sets contracts.status = 'CHANGES_REQUESTED'
+    // - Freezes the reviewed version as immutable
+    // - Enables redline mode for BU to see accepted/rejected clauses + comments
     onClose()
   }
 
@@ -127,6 +118,10 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
   const acceptedCount = findings.filter((f) => f.decision === "ACCEPTED").length
   const rejectedCount = findings.filter((f) => f.decision === "REJECTED").length
   const allDecided = pendingCount === 0
+
+  const highCount = findings.filter((f) => f.severity === "HIGH").length
+  const mediumCount = findings.filter((f) => f.severity === "MEDIUM").length
+  const lowCount = findings.filter((f) => f.severity === "LOW").length
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -143,49 +138,31 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
               </h2>
               <p className="text-xs text-muted-foreground">
                 {draft.contract_type} {"\u2013"} {draft.party_a} & {draft.party_b}
-                {" "}| {findings.length} flagged clause{findings.length !== 1 ? "s" : ""}
+                {" | "}{findings.length} flagged clause{findings.length !== 1 ? "s" : ""}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Save button */}
+            {/* Request Changes -- only when ALL findings are decided */}
             <Button
-              variant="outline"
               size="sm"
-              className="gap-2"
-              onClick={handleSave}
-              disabled={isSaved}
-            >
-              {isSaved ? (
-                <CheckCircle2 className="size-3.5 text-success-foreground" />
-              ) : (
-                <Save className="size-3.5" />
-              )}
-              {isSaved ? "Saved" : "Save"}
-            </Button>
-
-            {/* Request Changes -- requires at least one decision */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
+              className={`gap-2 ${
+                allDecided
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : ""
+              }`}
+              variant={allDecided ? "default" : "outline"}
               onClick={handleRequestChanges}
-              disabled={!findings.some((f) => f.decision !== "PENDING")}
+              disabled={!allDecided}
             >
               <Send className="size-3.5" />
               Request Changes
-            </Button>
-
-            {/* Approve Report -- only if all findings decided with NO rejections (or all accepted) */}
-            <Button
-              size="sm"
-              className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={handleApproveReport}
-              disabled={!allDecided || rejectedCount > 0}
-            >
-              <CheckCircle2 className="size-3.5" />
-              Approve Report
+              {!allDecided && (
+                <Badge variant="secondary" className="ml-1 h-4 px-1 text-[9px] font-mono">
+                  {pendingCount} left
+                </Badge>
+              )}
             </Button>
 
             <Separator orientation="vertical" className="h-6" />
@@ -204,15 +181,35 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
 
         {/* Stats ribbon */}
         <div className="flex items-center gap-4 border-t border-border bg-muted/50 px-6 py-2">
+          {/* Severity breakdown */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">Findings:</span>
-            <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-semibold">
-              {findings.length}
-            </Badge>
+            <span className="text-[11px] font-medium text-muted-foreground">Severity:</span>
           </div>
+          {highCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <div className="size-2 rounded-full bg-destructive" />
+              <span className="text-[11px] text-muted-foreground">High: {highCount}</span>
+            </div>
+          )}
+          {mediumCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <div className="size-2 rounded-full bg-warning" />
+              <span className="text-[11px] text-muted-foreground">Medium: {mediumCount}</span>
+            </div>
+          )}
+          {lowCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <div className="size-2 rounded-full bg-muted-foreground" />
+              <span className="text-[11px] text-muted-foreground">Low: {lowCount}</span>
+            </div>
+          )}
           <Separator orientation="vertical" className="h-4" />
+          {/* Decision progress */}
           <div className="flex items-center gap-1.5">
-            <div className="size-2 rounded-full bg-muted-foreground" />
+            <span className="text-[11px] font-medium text-muted-foreground">Decisions:</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="size-2 rounded-full bg-muted-foreground/40" />
             <span className="text-[11px] text-muted-foreground">Pending: {pendingCount}</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -222,6 +219,18 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
           <div className="flex items-center gap-1.5">
             <div className="size-2 rounded-full bg-destructive" />
             <span className="text-[11px] text-muted-foreground">Rejected: {rejectedCount}</span>
+          </div>
+          {/* Progress indicator */}
+          <div className="ml-auto flex items-center gap-2">
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                style={{ width: `${allDecided ? 100 : ((findings.length - pendingCount) / findings.length) * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono font-medium text-muted-foreground">
+              {findings.length - pendingCount}/{findings.length}
+            </span>
           </div>
         </div>
       </div>
@@ -315,7 +324,7 @@ export function PlaybookReviewReport({ report, draft, onClose }: PlaybookReviewR
   )
 }
 
-/* ── Finding Detail Panel ───────────────────────────────────────── */
+/* Finding Detail Panel */
 
 function FindingDetailPanel({
   finding,
@@ -340,7 +349,7 @@ function FindingDetailPanel({
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="mx-auto max-w-3xl px-6 py-6">
-        {/* Title + severity */}
+        {/* Title + severity + decision status */}
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-col gap-1">
             <h3 className="text-base font-semibold text-foreground">
@@ -350,13 +359,22 @@ function FindingDetailPanel({
               {finding.block_id} | {finding.issue_type}
             </p>
           </div>
-          <Badge
-            variant="outline"
-            className={`shrink-0 gap-1.5 px-2.5 py-1 text-xs font-semibold ${sevConfig.className}`}
-          >
-            <div className={`size-2 rounded-full ${sevConfig.dotClass}`} />
-            {sevConfig.label}
-          </Badge>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge
+              variant="outline"
+              className={`gap-1.5 px-2.5 py-1 text-xs font-semibold ${sevConfig.className}`}
+            >
+              <div className={`size-2 rounded-full ${sevConfig.dotClass}`} />
+              {sevConfig.label}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={`gap-1.5 px-2.5 py-1 text-xs font-semibold ${decConfig.className}`}
+            >
+              <div className={`size-2 rounded-full ${decConfig.dotClass}`} />
+              {decConfig.label}
+            </Badge>
+          </div>
         </div>
 
         <Separator className="my-5" />
@@ -411,51 +429,81 @@ function FindingDetailPanel({
 
         <Separator className="my-5" />
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-3">
-          <Button
-            size="sm"
-            variant={finding.decision === "ACCEPTED" ? "default" : "outline"}
-            className={`gap-2 ${
-              finding.decision === "ACCEPTED"
-                ? "bg-success text-success-foreground hover:bg-success/90"
-                : ""
-            }`}
-            onClick={() => onDecision(finding.id, "ACCEPTED")}
-          >
-            <Check className="size-3.5" />
-            Accept
-          </Button>
-          <Button
-            size="sm"
-            variant={finding.decision === "REJECTED" ? "default" : "outline"}
-            className={`gap-2 ${
-              finding.decision === "REJECTED"
-                ? "bg-destructive text-primary-foreground hover:bg-destructive/90"
-                : ""
-            }`}
-            onClick={() => onDecision(finding.id, "REJECTED")}
-          >
-            <X className="size-3.5" />
-            Reject
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            onClick={onToggleComment}
-          >
-            <MessageSquare className="size-3.5" />
-            {finding.legal_comment ? "Edit Comment" : "Add Comment"}
-          </Button>
-
-          <div className="ml-auto">
-            <Badge
-              variant="outline"
-              className={`px-2.5 py-1 text-xs font-semibold ${decConfig.className}`}
+        {/* Decision Actions */}
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Clause Decision
+          </h4>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Accept Change - Approves replacing the clause with fallback language */}
+            <Button
+              size="sm"
+              variant={finding.decision === "ACCEPTED" ? "default" : "outline"}
+              className={`gap-2 ${
+                finding.decision === "ACCEPTED"
+                  ? "bg-success text-success-foreground hover:bg-success/90"
+                  : ""
+              }`}
+              onClick={() => onDecision(finding.id, "ACCEPTED")}
             >
-              {decConfig.label}
-            </Badge>
+              <Check className="size-3.5" />
+              Accept Change
+            </Button>
+
+            {/* Reject Change - Keeps the original clause as-is (legal override) */}
+            <Button
+              size="sm"
+              variant={finding.decision === "REJECTED" ? "default" : "outline"}
+              className={`gap-2 ${
+                finding.decision === "REJECTED"
+                  ? "bg-destructive text-primary-foreground hover:bg-destructive/90"
+                  : ""
+              }`}
+              onClick={() => onDecision(finding.id, "REJECTED")}
+            >
+              <X className="size-3.5" />
+              Reject Change
+            </Button>
+
+            <Separator orientation="vertical" className="h-6" />
+
+            {/* Add Comment -- optional annotation for BU */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={onToggleComment}
+            >
+              <MessageSquare className="size-3.5" />
+              {finding.legal_comment ? "Edit Comment" : "Add Comment"}
+            </Button>
+          </div>
+
+          {/* Explanation of what each action means */}
+          <div className="mt-3 flex flex-col gap-1.5">
+            {finding.decision === "ACCEPTED" && (
+              <p className="flex items-start gap-2 text-xs text-success-foreground">
+                <Check className="mt-0.5 size-3 shrink-0" />
+                <span>
+                  Clause will be replaced with the approved fallback language.
+                  A new contract version will be generated with this change applied.
+                </span>
+              </p>
+            )}
+            {finding.decision === "REJECTED" && (
+              <p className="flex items-start gap-2 text-xs text-destructive">
+                <X className="mt-0.5 size-3 shrink-0" />
+                <span>
+                  Original clause will be kept as-is. The fallback suggestion is discarded.
+                  No version change for this clause.
+                </span>
+              </p>
+            )}
+            {finding.decision === "PENDING" && (
+              <p className="text-xs text-muted-foreground">
+                Choose to accept the fallback language or reject and keep the original clause.
+              </p>
+            )}
           </div>
         </div>
 
@@ -463,10 +511,10 @@ function FindingDetailPanel({
         {showCommentInput && (
           <div className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
             <label className="text-xs font-semibold text-muted-foreground">
-              Legal Comment (visible to Business User)
+              Legal Comment (visible to Business User in redline mode)
             </label>
             <Textarea
-              placeholder="Add your comment or reasoning for this decision..."
+              placeholder="Add reasoning for your decision, instructions for the BU, or notes..."
               value={commentDraft || finding.legal_comment}
               onChange={(e) => onCommentChange(e.target.value)}
               rows={3}
@@ -503,7 +551,7 @@ function FindingDetailPanel({
   )
 }
 
-/* ── Detail Section Helper ──────────────────────────────────────── */
+/* Detail Section Helper */
 
 function DetailSection({
   icon: Icon,
